@@ -1,0 +1,21 @@
+{
+	"name": "devrel-snippets",
+	"displayName": "Apigee DevRel Snippets",
+	"description": "Code Snippets from the Apigee DevRel Community",
+	"version": "0.0.1",
+	"publisher": "github.com/apigee/DevRel",
+	"engines": {
+		"vscode": "^1.28.0"
+	},
+	"categories": [
+		"Snippets"
+	],
+	"contributes": {
+		"snippets": [
+			{
+				"language": "xml",
+				"path": "./snippets.json"
+			}
+		]
+	}
+}

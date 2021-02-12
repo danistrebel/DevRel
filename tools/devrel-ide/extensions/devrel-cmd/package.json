@@ -1,0 +1,31 @@
+{
+    "name": "apigee-devrel-vscode-commands",
+    "description": "Apigee DevRel Commands for VS Code",
+    "version": "0.0.1",
+    "publisher": "apigee-devrel",
+    "repository": "https://github.com/apigee/devrel",
+    "engines": {
+        "vscode": "^1.32.0"
+    },
+    "activationEvents": [
+        "onCommand:extensions.apigee-proxy-generator",
+        "onCommand:extensions.apigee-add-deployment-config"
+    ],
+    "main": "./extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "extensions.apigee-proxy-generator",
+                "title": "Apigee: Proxy Generator"
+            },
+            {
+                "command": "extensions.apigee-add-deployment-config",
+                "title": "Apigee: Add deployment config"
+            }
+        ]
+    },
+    "scripts": {},
+    "devDependencies": {
+        "@types/vscode": "^1.32.0"
+    }
+}

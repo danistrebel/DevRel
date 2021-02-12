@@ -1,0 +1,39 @@
+{
+	"Apigee JSON Mock": {
+		"scope": "xml",
+		"prefix": "apigee-mock-json",
+		"body": [
+			"<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
+			"<AssignMessage name=\"AM-SetCodeReponse\">",
+			"\t<Set>",
+			"\t\t<Payload contentType=\"application/json\">",
+			"\t\t{}",
+			"\t\t</Payload>",
+			"\t</Set>",
+			"\t<AssignTo createNew=\"false\" transport=\"http\" type=\"response\"/>",
+			"</AssignMessage>"
+		],
+		"description": "JSON mock"
+	},
+	"Apigee Conditional Flow": {
+		"scope": "xml",
+		"prefix": "apigee-flow",
+		"body": [
+			"<Flow name=\"$1\">",
+    		"\t<Description/>",
+    		"\t<Request/>",
+    		"\t<Response/>",
+    		"\t<Condition>(proxy.pathsuffix MatchesPath \"$2\") and (request.verb = \"$3\")</Condition>",
+			"</Flow>"
+		]
+	},
+	"Apigee Step Block": {
+		"scope": "xml",
+		"prefix": "apigee-step",
+		"body": [
+			"<Step>",
+    		"\t<Name>$1</Name>",
+			"</Step>"
+		]
+	}
+}
