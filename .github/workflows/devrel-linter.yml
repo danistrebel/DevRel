@@ -31,14 +31,19 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v2
-
+      - name: Setup Node
+        uses: actions/setup-node@v2
+        with:
+          node-version: '14'
+      - name: Install Linter dependencies
+        run: npm install
       - name: Run Super-Linter
-        uses: docker://github/super-linter:v3.13.1
+        uses: docker://github/super-linter:v3
         env:
           DEFAULT_BRANCH: main
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VALIDATE_JAVASCRIPT_STANDARD: false
-          MARKDOWN_CONFIG_FILE: .markdown-lint.yml
+          LINTER_RULES_PATH: '.'
 
       - name: Check all files are licensed
         uses: ./tools/pipeline-linter
