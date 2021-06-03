@@ -246,8 +246,69 @@ if [ "$APIGEE_PROVISIONED" = "T" ]; then
 else
 
 
-echo "Step 4.4: Create a new eval org [it takes time, 10-20 minutes. please wait...]"
+set +e # todo properly handling existing load balancer resources
 
+echo "Step 7d.1: Reserve an IP address for the Load Balancer"
+gcloud compute addresses create lb-ipv4-vip-1 --ip-version=IPV4 --global --project "$PROJECT"
+
+echo "Step 7d.2: Get a reserved IP address"
+RUNTIME_IP=$(gcloud compute addresses describe lb-ipv4-vip-1 --format="get(address)" --global --project "$PROJECT")
+export RUNTIME_IP
+
+echo "Step 7e: Configure TLS Certificates:"
+if [ "$CERTIFICATES" = "managed" ]; then
+  echo "Step 7e.1: Using Google managed certificate:"
+  RUNTIME_HOST_ALIAS="$ENV_GROUP_NAME".$(echo "$RUNTIME_IP" | tr '.' '-').nip.io
+  gcloud compute ssl-certificates create apigee-ssl-cert \
+    --domains="$RUNTIME_HOST_ALIAS" --project "$PROJECT"
+elif [ "$CERTIFICATES" = "generated" ]; then
+  echo "Step 7e.1: Generate eval certificate and key"
+  export RUNTIME_TLS_CERT=~/mig-cert.pem
+  export RUNTIME_TLS_KEY=~/mig-key.pem
+  openssl req -x509 -out "$RUNTIME_TLS_CERT" -keyout "$RUNTIME_TLS_KEY" -newkey rsa:2048 -nodes -sha256 -subj '/CN='"$RUNTIME_HOST_ALIAS"'' -extensions EXT -config <( printf "[dn]\nCN=$RUNTIME_HOST_ALIAS\n[req]\ndistinguished_name=dn\n[EXT]\nbasicConstraints=critical,CA:TRUE,pathlen:1\nsubjectAltName=DNS:$RUNTIME_HOST_ALIAS\nkeyUsage=digitalSignature,keyCertSign\nextendedKeyUsage=serverAuth")
+
+  echo "Step 7e.2: Upload your TLS server certificate and key to GCP"
+  gcloud compute ssl-certificates create apigee-ssl-cert \
+    --certificate="$RUNTIME_TLS_CERT" \
+    --private-key="$RUNTIME_TLS_KEY" --project "$PROJECT"
+else
+  echo "Step 7e.2: Upload your TLS server certificate and key to GCP"
+  gcloud compute ssl-certificates create apigee-ssl-cert \
+    --certificate="$RUNTIME_TLS_CERT" \
+    --private-key="$RUNTIME_TLS_KEY" --project "$PROJECT"
+fi
+
+echo "Step 7f: Create a global Load Balancer"
+
+echo "Step 7f.1: Create a health check"
+gcloud compute health-checks create https hc-apigee-proxy-443 \
+  --port 443 --global \
+  --request-path /healthz/ingress --project "$PROJECT"
+
+echo "Step 7f.2: Create a backend service called 'apigee-proxy-backend'"
+
+gcloud compute backend-services create apigee-proxy-backend \
+  --protocol HTTPS --health-checks hc-apigee-proxy-443 \
+  --port-name https --timeout 60s --connection-draining-timeout 300s --global --project "$PROJECT"
+
+
+echo "Step 7f.4: Create a Load Balancing URL map"
+gcloud compute url-maps create apigee-proxy-map \
+  --default-service apigee-proxy-backend --project "$PROJECT"
+
+echo "Step 7f.5: Create a Load Balancing target HTTPS proxy"
+gcloud compute target-https-proxies create apigee-proxy-https-proxy \
+  --url-map apigee-proxy-map \
+  --ssl-certificates apigee-ssl-cert --project "$PROJECT"
+
+echo "Step 7f.6: Create a global forwarding rule"
+gcloud compute forwarding-rules create apigee-proxy-https-lb-rule \
+  --address lb-ipv4-vip-1 --global \
+  --target-https-proxy apigee-proxy-https-proxy --ports 443 --project "$PROJECT"
+
+set -e
+
+echo "Step 4.4: Create a new eval org [it takes time, 10-20 minutes. please wait...]"
 set +e
 gcloud alpha apigee organizations provision \
   --runtime-location="$REGION" \
@@ -320,39 +381,7 @@ gcloud compute instance-groups managed set-named-ports "$MIG" \
 echo "Step 7d: Create firewall rules"
 
 
-echo "Step 7d.1: Reserve an IP address for the Load Balancer"
-gcloud compute addresses create lb-ipv4-vip-1 --ip-version=IPV4 --global --project "$PROJECT"
-
-echo "Step 7d.2: Get a reserved IP address"
-RUNTIME_IP=$(gcloud compute addresses describe lb-ipv4-vip-1 --format="get(address)" --global --project "$PROJECT")
-export RUNTIME_IP
-
-
-
-echo "Step 7e: Upload credentials:"
-
-if [ "$CERTIFICATES" = "managed" ]; then
-  echo "Step 7e.1: Using Google managed certificate:"
-  RUNTIME_HOST_ALIAS="$ENV_GROUP_NAME".$(echo "$RUNTIME_IP" | tr '.' '-').nip.io
-  gcloud compute ssl-certificates create apigee-ssl-cert \
-    --domains="$RUNTIME_HOST_ALIAS" --project "$PROJECT"
-elif [ "$CERTIFICATES" = "generated" ]; then
-  echo "Step 7e.1: Generate eval certificate and key"
-  export RUNTIME_TLS_CERT=~/mig-cert.pem
-  export RUNTIME_TLS_KEY=~/mig-key.pem
-  openssl req -x509 -out "$RUNTIME_TLS_CERT" -keyout "$RUNTIME_TLS_KEY" -newkey rsa:2048 -nodes -sha256 -subj '/CN='"$RUNTIME_HOST_ALIAS"'' -extensions EXT -config <( printf "[dn]\nCN=$RUNTIME_HOST_ALIAS\n[req]\ndistinguished_name=dn\n[EXT]\nbasicConstraints=critical,CA:TRUE,pathlen:1\nsubjectAltName=DNS:$RUNTIME_HOST_ALIAS\nkeyUsage=digitalSignature,keyCertSign\nextendedKeyUsage=serverAuth")
-
-  echo "Step 7e.2: Upload your TLS server certificate and key to GCP"
-  gcloud compute ssl-certificates create apigee-ssl-cert \
-    --certificate="$RUNTIME_TLS_CERT" \
-    --private-key="$RUNTIME_TLS_KEY" --project "$PROJECT"
-else
-  echo "Step 7e.2: Upload your TLS server certificate and key to GCP"
-  gcloud compute ssl-certificates create apigee-ssl-cert \
-    --certificate="$RUNTIME_TLS_CERT" \
-    --private-key="$RUNTIME_TLS_KEY" --project "$PROJECT"
-fi
-
+echo "Ensure Host Alias for $ENV_GROUP_NAME is set to $RUNTIME_HOST_ALIAS"
 CURRENT_HOST_ALIAS=$(curl -X GET --silent -H "Authorization: Bearer $(token)"  \
     -H "Content-Type:application/json" https://apigee.googleapis.com/v1/organizations/"$ORG"/envgroups/$ENV_GROUP_NAME | jq -r '.hostnames[0]')
 
@@ -363,43 +392,16 @@ if [ "$RUNTIME_HOST_ALIAS" != "$CURRENT_HOST_ALIAS" ]; then
     -d "{\"hostnames\": [\"$RUNTIME_HOST_ALIAS\"]}"
 fi
 
-echo "Step 7f: Create a global Load Balancer"
-
-echo "Step 7f.1: Create a health check"
-gcloud compute health-checks create https hc-apigee-proxy-443 \
-  --port 443 --global \
-  --request-path /healthz/ingress --project "$PROJECT"
-
-echo "Step 7f.2: Create a backend service called 'apigee-proxy-backend'"
-
-gcloud compute backend-services create apigee-proxy-backend \
-  --protocol HTTPS --health-checks hc-apigee-proxy-443 \
-  --port-name https --timeout 60s --connection-draining-timeout 300s --global --project "$PROJECT"
-
 echo "Step 7f.3: Add the Load Balancer Proxy VM instance group to your backend service"
 gcloud compute backend-services add-backend apigee-proxy-backend \
   --instance-group "$MIG" \
   --instance-group-region "$REGION" \
   --balancing-mode UTILIZATION --max-utilization 0.8 --global --project "$PROJECT"
 
-echo "Step 7f.4: Create a Load Balancing URL map"
-gcloud compute url-maps create apigee-proxy-map \
-  --default-service apigee-proxy-backend --project "$PROJECT"
-
-echo "Step 7f.5: Create a Load Balancing target HTTPS proxy"
-gcloud compute target-https-proxies create apigee-proxy-https-proxy \
-  --url-map apigee-proxy-map \
-  --ssl-certificates apigee-ssl-cert --project "$PROJECT"
-
-echo "Step 7f.6: Create a global forwarding rule"
-gcloud compute forwarding-rules create apigee-proxy-https-lb-rule \
-  --address lb-ipv4-vip-1 --global \
-  --target-https-proxy apigee-proxy-https-proxy --ports 443 --project "$PROJECT"
-
 set -e
 
 echo ""
-echo "Almost done. It take some time (another 5-8 minutes) to provision the load balancer infrastructure."
+echo "Waiting for the load balancer infrastructre and TLS certificate to become ready.."
 echo ""
 
 # TODO: more intelligent wait until LB is ready
